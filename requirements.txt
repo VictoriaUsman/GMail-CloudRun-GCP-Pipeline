@@ -1,0 +1,8 @@
+pandas
+pandas-gbq
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+flask
+gunicorn
+db-dtypes
