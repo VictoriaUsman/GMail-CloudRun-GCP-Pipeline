@@ -6,3 +6,4 @@ google-auth-httplib2
 flask
 gunicorn
 db-dtypes
+google-cloud-secret-manager

@@ -1,149 +1,158 @@
 <img width="1604" height="1030" alt="C5308E27-52ED-4888-8300-BFAA4445CB71" src="https://github.com/user-attachments/assets/7c8f1f36-b7d6-40a5-b391-70de142e4cd0" />
 
+# Gmail-to-BigQuery Data Pipeline
 
-📊 CSV to BigQuery Data Pipeline (GCP + Cloud Run + Power BI)
-🚀 Overview
+A serverless data pipeline that extracts CSV attachments from Gmail, deduplicates records, and loads them into BigQuery. Runs on Google Cloud Run with a built-in web dashboard and optional daily scheduling via Apache Airflow (Cloud Composer).
 
-This project demonstrates an end-to-end data ingestion and analytics pipeline built on Google Cloud Platform (GCP).
-The pipeline ingests CSV files sent via email, processes them using a Python application running on Cloud Run, loads the data into BigQuery, and finally enables reporting and visualization in Power BI.
+## Architecture
 
-This architecture is designed to be serverless, scalable, and cost-efficient, making it ideal for automated batch ingestion use cases.
+```
+Gmail (CSV attachments)
+        │
+        ▼
+  Cloud Run (Flask)  ◄──  Cloud Composer (Airflow DAG)
+   POST /run                 @daily schedule
+        │
+        ▼
+    BigQuery
+        │
+        ▼
+    Power BI
+```
 
-🏗️ Architecture
+## Tech Stack
 
-Flow:
+| Layer | Technology |
+|-------|-----------|
+| Email Source | Gmail API |
+| Compute | Google Cloud Run |
+| Orchestration | Apache Airflow (Cloud Composer) |
+| Data Warehouse | BigQuery |
+| Secrets | GCP Secret Manager |
+| Visualization | Power BI |
 
-CSV Files (Email Input)
+## Project Structure
 
-Users send CSV files (e.g. reports, transactions, logs) via email.
-
-Files are collected and passed to the ingestion service.
-
-Cloud Run (Python Service)
-
-A containerized Python application runs on Cloud Run.
-
-Responsible for:
-
-Validating CSV files
-
-Cleaning and transforming data
-
-Schema alignment
-
-Loading data to BigQuery
-
-BigQuery (Data Warehouse)
-
-Processed data is stored in BigQuery tables.
-
-Optimized for analytics and BI workloads.
-
-Power BI (Analytics & Reporting)
-
-Power BI connects directly to BigQuery.
-
-Dashboards and reports are built on top of curated datasets.
-
-⚙️ Tech Stack
-Layer	Technology
-Ingestion	CSV via Email
-Processing	Python
-Compute	Google Cloud Run
-Data Warehouse	BigQuery
-Visualization	Power BI
-Cloud Platform	GCP
-🧠 Key Features
-
-✅ Serverless processing (no VM management)
-
-✅ Auto-scaling with Cloud Run
-
-✅ Secure and reliable ingestion
-
-✅ Schema-controlled BigQuery loading
-
-✅ BI-ready datasets
-
-✅ Cost-efficient architecture
-
-📂 Project Structure (Example)
+```
 .
-├── app/
-│   ├── main.py            # Cloud Run entrypoint
-│   ├── processor.py       # CSV processing logic
-│   ├── bigquery_loader.py # BQ load functions
-│   └── utils.py
-├── Dockerfile
-├── requirements.txt
-├── README.md
+├── main.py                        # Flask app — pipeline logic + dashboard
+├── dags/
+│   └── gmail_pipeline_dag.py      # Airflow DAG for daily scheduling
+├── Dockerfile                     # Cloud Run container
+├── requirements.txt               # Python dependencies (Cloud Run)
+├── generate_token.py              # One-time Gmail OAuth token generator
+└── README.md
+```
 
-🔄 Data Processing Logic
+## How It Works
 
-Receive CSV file
+1. **Trigger** — `POST /run` is called (manually via dashboard, or by Airflow)
+2. **Extract** — Queries Gmail for today's emails with CSV attachments
+3. **Deduplicate** — Compares incoming rows against existing BigQuery data using the `timestamp` column
+4. **Load** — Appends only new rows to BigQuery via `pandas-gbq`
 
-Validate columns & data types
+## Endpoints
 
-Clean nulls and bad records
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | Web dashboard with run history and charts |
+| `POST` | `/run` | Trigger the pipeline |
+| `GET` | `/stats` | Returns BigQuery row count as JSON |
 
-Transform data (if needed)
+## Setup
 
-Load to BigQuery using google-cloud-bigquery
+### Prerequisites
 
-Return success/failure response
+- GCP project with billing enabled
+- Gmail API enabled
+- BigQuery dataset and table created
+- GCP Secret Manager secret (`gmail-token`) containing OAuth token JSON
 
-🧪 Example Use Cases
+### 1. Generate Gmail Token
 
-Daily sales reports ingestion
+```bash
+python generate_token.py
+```
 
-Finance data pipelines
+Upload the resulting `token.json` to Secret Manager:
 
-Operational metrics ingestion
+```bash
+gcloud secrets create gmail-token --data-file=token.json
+```
 
-Automated reporting pipelines
+### 2. Deploy to Cloud Run
 
-Analytics-ready data for BI tools
+```bash
+gcloud builds submit --tag gcr.io/PROJECT_ID/gmail-pipeline
 
-🚀 Deployment (Cloud Run)
-gcloud builds submit --tag gcr.io/PROJECT_ID/csv-pipeline
-gcloud run deploy csv-pipeline \
-  --image gcr.io/PROJECT_ID/csv-pipeline \
+gcloud run deploy gmail-pipeline \
+  --image gcr.io/PROJECT_ID/gmail-pipeline \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated
+```
 
-📈 Visualization
+### 3. Schedule with Cloud Composer (Optional)
 
-Power BI connects to BigQuery using:
+Create a Cloud Composer environment:
 
-DirectQuery (real-time dashboards)
+```bash
+gcloud composer environments create gmail-pipeline-composer \
+  --location us-central1 \
+  --image-version composer-3-airflow-2.10.2-build.7
+```
 
-Import mode (optimized performance)
+Upload the DAG:
 
-🔐 Security Best Practices
+```bash
+DAGS_BUCKET=$(gcloud composer environments describe gmail-pipeline-composer \
+  --location us-central1 \
+  --format="value(config.dagGcsPrefix)")
 
-Service Account with least-privilege access
+gsutil cp dags/gmail_pipeline_dag.py $DAGS_BUCKET/
+```
 
-BigQuery IAM roles limited to dataset level
+Configure the Airflow HTTP connection:
 
-Secrets managed via GCP Secret Manager
+```bash
+gcloud composer environments run gmail-pipeline-composer \
+  --location us-central1 \
+  connections add -- \
+  gmail_pipeline_cloudrun \
+  --conn-type http \
+  --conn-host "https://<CLOUD_RUN_SERVICE_URL>"
+```
 
-HTTPS-only Cloud Run endpoint
+> **Note:** Cloud Composer runs a GKE cluster (~$300+/month). For a single daily job, **Cloud Scheduler** is a cheaper alternative (~$0.10/month):
+>
+> ```bash
+> gcloud scheduler jobs create http gmail-pipeline-daily \
+>   --location us-central1 \
+>   --schedule "0 0 * * *" \
+>   --uri "https://<CLOUD_RUN_SERVICE_URL>/run" \
+>   --http-method POST \
+>   --oidc-service-account-email <SERVICE_ACCOUNT>
+> ```
 
-📝 Future Improvements
+## Configuration
 
-Add Cloud Scheduler for automation
+These values are set in `main.py`:
 
-Add Pub/Sub for event-driven ingestion
+| Variable | Description |
+|----------|-------------|
+| `PROJECT_ID` | GCP project ID |
+| `SECRET_NAME` | Secret Manager secret name for Gmail token |
+| `DATASET_ID` | BigQuery dataset |
+| `TABLE_ID` | BigQuery table |
 
-Data quality checks (Great Expectations)
+## Security
 
-DBT transformations in BigQuery
+- OAuth token stored in GCP Secret Manager (not in source)
+- Cloud Run enforces HTTPS
+- Service account with least-privilege IAM roles
+- `.dockerignore` excludes credentials from the container image
 
-Partitioned & clustered tables
+## Author
 
-👨‍💻 Author
-
-Ian Tristan
-Aspiring Data Engineer | Cloud & Analytics
-GCP • AWS • Azure • Python • SQL • BigQuery • Power BI
+**Ian Tristan** — Aspiring Data Engineer | Cloud & Analytics
+GCP | AWS | Azure | Python | SQL | BigQuery | Power BI
