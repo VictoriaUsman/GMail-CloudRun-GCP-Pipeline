@@ -1,4 +1,6 @@
 credentials.json
 token.json
+service-account.json
+.env
 __pycache__/
 *.pyc

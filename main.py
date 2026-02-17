@@ -13,10 +13,11 @@ from pandas_gbq import read_gbq, to_gbq
 
 app = Flask(__name__)
 
-PROJECT_ID = "donkee-473801"
-SECRET_NAME = "gmail-token"
-DATASET_ID = "UpworkTest"
-TABLE_ID = "test-upwork"
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "donkee-473801")
+SECRET_NAME = os.environ.get("SECRET_NAME", "gmail-token")
+DATASET_ID = os.environ.get("BQ_DATASET_ID", "UpworkTest")
+TABLE_ID = os.environ.get("BQ_TABLE_ID", "test-upwork")
+UNIQUE_COL = os.environ.get("UNIQUE_COL", "timestamp")
 
 # In-memory run log (last 20 runs)
 run_log = []
@@ -46,8 +47,6 @@ def get_bq_row_count():
 
 def run_gmail_to_bigquery_pipeline():
     service, creds = get_gmail_service()
-
-    UNIQUE_COL = "timestamp"
 
     today_str = datetime.now().strftime('%Y/%m/%d')
     query = f"after:{today_str} has:attachment filename:csv"
